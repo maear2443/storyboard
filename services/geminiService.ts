@@ -5,7 +5,7 @@ export const generateSceneImage = async (prompt: string, customApiKey?: string):
   const keyToUse = customApiKey || process.env.API_KEY;
 
   if (!keyToUse) {
-    throw new Error("API Key is missing. Please click 'Setup API Key' to add your own Google Gemini API Key.");
+    throw new Error("API Key is missing. Please click 'Settings' to add your own Google Gemini API Key.");
   }
 
   const ai = new GoogleGenAI({ apiKey: keyToUse });
@@ -46,7 +46,7 @@ export const generateSceneImage = async (prompt: string, customApiKey?: string):
     
     // Improve error message for the user
     if (error.toString().includes("429")) {
-        throw new Error("Quota Exceeded (429). You are generating too fast. Please wait a moment or use a paid API Key.");
+        throw new Error("Quota Exceeded (429). Please use your own API Key in Settings.");
     }
     throw error;
   }

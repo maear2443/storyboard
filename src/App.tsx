@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { INITIAL_SCENES } from './constants';
 import { SceneData } from './types';
 import SceneCard from './components/SceneCard';
@@ -9,33 +9,28 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<number>(0); // 0 = All
   const [apiKey, setApiKey] = useState<string>('');
   const [showSettings, setShowSettings] = useState<boolean>(false);
-  const [tempKey, setTempKey] = useState<string>('');
   
   // Queue State
-  const [isBulkGenerating, setIsBulkGenerating] = useState<boolean>(false);
+  const [isQueueRunning, setIsQueueRunning] = useState<boolean>(false);
   const [queueStatus, setQueueStatus] = useState<string>('');
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [countdown, setCountdown] = useState<number>(0);
 
   // Load API key from local storage on mount
   useEffect(() => {
     const storedKey = localStorage.getItem('gemini_user_api_key');
-    if (storedKey) {
-      setApiKey(storedKey);
-      setTempKey(storedKey);
-    }
+    if (storedKey) setApiKey(storedKey);
   }, []);
 
-  const saveApiKey = () => {
-    setApiKey(tempKey);
-    localStorage.setItem('gemini_user_api_key', tempKey);
+  const saveApiKey = (key: string) => {
+    setApiKey(key);
+    localStorage.setItem('gemini_user_api_key', key);
     setShowSettings(false);
   };
 
   // Extract unique sections for tabs
-  const sections = Array.from(new Set(INITIAL_SCENES.map(s => s.sectionTitle)));
+  const sections: string[] = Array.from(new Set(INITIAL_SCENES.map((s) => s.sectionTitle)));
 
   const handleGenerate = useCallback(async (id: number) => {
-    // Update state to loading
     setScenes(prev => prev.map(scene => 
       scene.id === id ? { ...scene, isGenerating: true, error: undefined } : scene
     ));
@@ -44,9 +39,7 @@ const App: React.FC = () => {
     if (!sceneToGenerate) return;
 
     try {
-      // Pass the user's API key to the service
       const imageUrl = await generateSceneImage(sceneToGenerate.prompt, apiKey);
-      
       setScenes(prev => prev.map(scene => 
         scene.id === id ? { ...scene, isGenerating: false, imageUrl } : scene
       ));
@@ -57,75 +50,141 @@ const App: React.FC = () => {
     }
   }, [scenes, apiKey]);
 
-  const handleMainButtonClick = async () => {
-      if (!apiKey) {
-          setTempKey('');
-          setShowSettings(true);
-          return;
-      }
+  // Smart Queue System for Sequential Generation
+  const runGenerationQueue = async (scenesToGen: SceneData[]) => {
+      setIsQueueRunning(true);
       
-      if (isBulkGenerating) {
-          // Cancel functionality
-          if (abortControllerRef.current) {
-              abortControllerRef.current.abort();
+      for (let i = 0; i < scenesToGen.length; i++) {
+          const scene = scenesToGen[i];
+          
+          // Skip if already has image or is currently generating
+          if (scene.imageUrl || scene.isGenerating) continue;
+
+          setQueueStatus(`Generating Scene ${scene.id}... (${i + 1}/${scenesToGen.length})`);
+          
+          // Trigger generation
+          await handleGenerate(scene.id);
+
+          // If it's not the last one, cool down to avoid 429
+          if (i < scenesToGen.length - 1) {
+              for (let c = 6; c > 0; c--) {
+                  setCountdown(c);
+                  setQueueStatus(`Cooling down... ${c}s`);
+                  await new Promise(r => setTimeout(r, 1000));
+              }
           }
-          setIsBulkGenerating(false);
-          setQueueStatus('Generation stopped by user.');
-          return;
       }
 
-      await generateAllVisible();
+      setQueueStatus('All tasks completed!');
+      setCountdown(0);
+      setTimeout(() => {
+          setIsQueueRunning(false);
+          setQueueStatus('');
+      }, 2000);
   };
 
   const generateAllVisible = async () => {
-     setIsBulkGenerating(true);
-     abortControllerRef.current = new AbortController();
-     const signal = abortControllerRef.current.signal;
+    if (!apiKey && !process.env.API_KEY) {
+        setShowSettings(true);
+        alert("Please enter your Gemini API Key first.");
+        return;
+    }
 
      const visibleScenes = activeTab === 0 
         ? scenes 
         : scenes.filter(s => s.sectionTitle === sections[activeTab - 1]);
      
-     const toGenerate = visibleScenes.filter(s => !s.imageUrl);
-     
-     if (toGenerate.length === 0) {
-        setQueueStatus('All visible scenes already have images.');
-        setTimeout(() => {
-            setIsBulkGenerating(false);
-            setQueueStatus('');
-        }, 2000);
-        return;
+     // Filter only those that need generation
+     const targetScenes = visibleScenes.filter(s => !s.imageUrl && !s.isGenerating);
+
+     if (targetScenes.length === 0) {
+         alert("All scenes in this section are already generated!");
+         return;
      }
 
-     let completedCount = 0;
-
-     for (const scene of toGenerate) {
-         if (signal.aborted) break;
-
-         // 1. Generate
-         setQueueStatus(`Generating Scene ${scene.id} (${completedCount + 1}/${toGenerate.length})...`);
-         await handleGenerate(scene.id);
-         completedCount++;
-
-         // 2. Cooldown (Only if not the last one)
-         if (completedCount < toGenerate.length && !signal.aborted) {
-             for (let i = 6; i > 0; i--) {
-                 if (signal.aborted) break;
-                 setQueueStatus(`Cooling down API (Free Tier Limit)... Resuming in ${i}s`);
-                 await new Promise(r => setTimeout(r, 1000));
-             }
-         }
-     }
-
-     if (!signal.aborted) {
-        setQueueStatus('Sequence completed successfully.');
-        setTimeout(() => setQueueStatus(''), 3000);
-     }
-     setIsBulkGenerating(false);
+     runGenerationQueue(targetScenes);
   };
 
   const handlePrint = () => {
-    window.print();
+    // Check if we are in an iframe (Preview mode)
+    const isInIframe = window.self !== window.top;
+
+    if (!isInIframe) {
+        // Standard print for standalone usage
+        window.print();
+    } else {
+        // "Pop-out" print for Preview/Iframe usage
+        const printWindow = window.open('', '_blank', 'width=1200,height=800');
+        
+        if (!printWindow) {
+            alert("Please allow popups for this site to download the PDF.");
+            return;
+        }
+
+        // Clone the necessary parts of the document
+        const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
+        const content = document.getElementById('root')?.innerHTML || '';
+        
+        // Specific Tailwind CDN (ensure it's included in the new window)
+        const tailwindScript = '<script src="https://cdn.tailwindcss.com"></script>';
+
+        // Custom print CSS to ensure background consistency
+        const customPrintStyle = `
+            <style>
+                @media print {
+                    @page { margin: 1cm; size: A4 portrait; }
+                    body { -webkit-print-color-adjust: exact; background-color: white !important; }
+                    .no-print { display: none !important; }
+                    .print-only { display: block !important; }
+                    .scene-grid { 
+                        display: grid !important; 
+                        grid-template-columns: 1fr 1fr !important; 
+                        gap: 1rem !important;
+                        page-break-inside: auto;
+                    }
+                    /* Hide scrollbars in print */
+                    ::-webkit-scrollbar { display: none; }
+                }
+                /* Default view in the popup before printing */
+                body { background-color: white; font-family: sans-serif; }
+                /* Ensure images are visible */
+                img { max-width: 100%; }
+            </style>
+        `;
+
+        let styleTags = '';
+        styles.forEach(node => {
+            styleTags += node.outerHTML;
+        });
+
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>두 세계의 약속 - Storyboard PDF</title>
+                    ${tailwindScript}
+                    ${styleTags}
+                    ${customPrintStyle}
+                </head>
+                <body>
+                    <div id="root" class="bg-white text-black">
+                        ${content}
+                    </div>
+                    <script>
+                        // Wait for Tailwind and images to load before printing
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                                // Optional: close window after print
+                                // window.close();
+                            }, 1000);
+                        };
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.focus();
+    }
   };
 
   const filteredScenes = activeTab === 0 
@@ -135,68 +194,20 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col pb-12 bg-slate-950 print:bg-white print:pb-0">
       
-      {/* Global Print Styles */}
+      {/* Global Print Styles (In-page fallback) */}
       <style>{`
         @media print {
-          @page { margin: 0.5cm; size: A4 portrait; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; }
+          @page { margin: 1cm; size: A4 portrait; }
+          body { -webkit-print-color-adjust: exact; }
           .no-print { display: none !important; }
           .print-only { display: block !important; }
           .scene-grid { 
              display: grid !important; 
              grid-template-columns: 1fr 1fr !important; 
-             gap: 1.5rem !important;
-             page-break-inside: auto;
+             gap: 1rem !important;
           }
-          .break-inside-avoid { page-break-inside: avoid; }
         }
       `}</style>
-
-      {/* Settings Modal */}
-      {showSettings && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 no-print">
-            <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-2xl max-w-md w-full overflow-hidden">
-                <div className="p-4 bg-slate-900 border-b border-slate-700">
-                    <h3 className="text-lg font-bold text-white">Settings</h3>
-                </div>
-                <div className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                            Google Gemini API Key
-                        </label>
-                        <input 
-                            type="password" 
-                            value={tempKey}
-                            onChange={(e) => setTempKey(e.target.value)}
-                            placeholder="Enter your AI Studio API Key"
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
-                        />
-                        <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-                            A valid API Key is required to generate images. 
-                            <br/>
-                            Get one for free at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">Google AI Studio</a>.
-                            <br/>
-                            (Your key is stored locally in your browser).
-                        </p>
-                    </div>
-                </div>
-                <div className="p-4 bg-slate-900 border-t border-slate-700 flex justify-end gap-3">
-                    <button 
-                        onClick={() => setShowSettings(false)}
-                        className="px-4 py-2 text-slate-400 hover:text-white text-sm font-medium transition-colors"
-                    >
-                        Cancel
-                    </button>
-                    <button 
-                        onClick={saveApiKey}
-                        className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-cyan-500/20 transition-all"
-                    >
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
 
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 shadow-2xl no-print">
@@ -213,9 +224,9 @@ const App: React.FC = () => {
           
           <div className="flex items-center gap-3">
             <button 
-                onClick={() => { setTempKey(apiKey); setShowSettings(true); }}
-                className={`p-2 transition-colors ${apiKey ? 'text-cyan-400' : 'text-slate-400 hover:text-white'}`}
-                title={apiKey ? "API Key Configured" : "Configure API Key"}
+                onClick={() => setShowSettings(true)}
+                className="p-2 text-slate-400 hover:text-cyan-400 transition-colors"
+                title="API Settings"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -229,100 +240,167 @@ const App: React.FC = () => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                Print / PDF
+                Download PDF
             </button>
-            <button 
-                onClick={handleMainButtonClick}
-                className={`hidden sm:flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-lg transition-all shadow-lg active:scale-95 ${
-                    isBulkGenerating
-                    ? 'bg-amber-600 hover:bg-amber-500'
-                    : apiKey 
-                        ? 'bg-cyan-600 hover:bg-cyan-500 hover:shadow-cyan-500/25' 
-                        : 'bg-rose-600 hover:bg-rose-500 hover:shadow-rose-500/25 animate-pulse'
-                }`}
-            >
-                {isBulkGenerating ? (
-                    <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Stop Queue
-                    </>
-                ) : (
-                    <>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                        </svg>
-                        {apiKey ? "Visualize Section" : "Setup API Key"}
-                    </>
-                )}
-            </button>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav className="flex gap-6 overflow-x-auto no-scrollbar">
-                <button
-                    onClick={() => setActiveTab(0)}
-                    className={`pb-3 text-xs font-bold uppercase tracking-widest whitespace-nowrap border-b-2 transition-colors ${
-                        activeTab === 0 
-                        ? 'border-cyan-500 text-white' 
-                        : 'border-transparent text-slate-500 hover:text-slate-300'
-                    }`}
+            {isQueueRunning ? (
+                <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-800 text-cyan-400 text-sm font-medium rounded-lg border border-cyan-900/50">
+                     <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+                     {countdown > 0 ? `Cooling down (${countdown}s)` : 'Processing...'}
+                </div>
+            ) : (
+                <button 
+                    onClick={generateAllVisible}
+                    className="hidden sm:flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium rounded-lg transition-all shadow-lg hover:shadow-cyan-500/25 active:scale-95"
                 >
-                    Full Storyboard
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {apiKey ? 'Visualize Section' : 'Setup API Key'}
                 </button>
-                {sections.map((section: string, idx) => (
-                    <button
-                        key={idx}
-                        onClick={() => setActiveTab(idx + 1)}
-                        className={`pb-3 text-xs font-bold uppercase tracking-widest whitespace-nowrap border-b-2 transition-colors ${
-                            activeTab === idx + 1
-                            ? 'border-cyan-500 text-white' 
-                            : 'border-transparent text-slate-500 hover:text-slate-300'
-                        }`}
-                    >
-                        {section.split('.')[1]?.split('(')[0] || `Part ${idx + 1}`}
-                    </button>
-                ))}
-            </nav>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Main Grid */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 scene-grid print:block">
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 no-print">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 max-w-md w-full shadow-2xl">
+                <h3 className="text-xl font-bold text-white mb-2">API Configuration</h3>
+                <p className="text-slate-400 text-sm mb-4">
+                    Enter your Google Gemini API Key to bypass quota limits. 
+                    The key is stored locally in your browser.
+                </p>
+                <input 
+                    type="password" 
+                    placeholder="Enter your API Key (AIza...)" 
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500 mb-4"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                />
+                <div className="flex justify-end gap-3">
+                    <button 
+                        onClick={() => setShowSettings(false)}
+                        className="px-4 py-2 text-slate-400 hover:text-white text-sm"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={() => saveApiKey(apiKey)}
+                        className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium shadow-lg shadow-cyan-500/20"
+                    >
+                        Save API Key
+                    </button>
+                </div>
+                <div className="mt-4 text-xs text-slate-500 border-t border-slate-800 pt-3">
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-cyan-500 hover:underline">Get a free API key here</a>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Print Header (Only visible when printing) */}
+      <div className="hidden print:block p-8 border-b-2 border-black mb-6">
+          <h1 className="text-3xl font-bold text-black uppercase mb-2">Project: 두 세계의 약속 (Promise of Two Worlds)</h1>
+          <div className="flex justify-between text-sm text-gray-600">
+              <span>Director's Visualization Board</span>
+              <span>Generated: {new Date().toLocaleDateString()}</span>
+          </div>
+      </div>
+
+      {/* Main Layout */}
+      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full print:p-0 print:max-w-none">
+        
+        {/* Navigation Tabs (Hidden on print) */}
+        <div className="flex overflow-x-auto pb-4 mb-6 gap-2 no-scrollbar no-print">
+          <button
+            onClick={() => setActiveTab(0)}
+            className={`px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+              activeTab === 0 
+                ? 'bg-slate-100 text-slate-900' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+            disabled={isQueueRunning}
+          >
+            All Scenes
+          </button>
+          {sections.map((section, index) => (
+            <button
+              key={section}
+              onClick={() => setActiveTab(index + 1)}
+              className={`px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                activeTab === index + 1
+                  ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/25' 
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`}
+              disabled={isQueueRunning}
+            >
+              {section}
+            </button>
+          ))}
+        </div>
+
+        {/* Info Banner (Hidden on print) */}
+        <div className="mb-8 p-4 bg-slate-900 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 no-print">
+            <div>
+                <h2 className="text-slate-200 font-semibold mb-1">Storyboard Sequence</h2>
+                <p className="text-slate-400 text-xs">
+                    Reviewing: <span className="text-cyan-400">{activeTab === 0 ? 'Full Script (24 Scenes)' : sections[activeTab-1]}</span>
+                </p>
+            </div>
+            
+            <div className="flex flex-col items-end gap-2">
+                <div className="flex gap-4 text-xs text-slate-500">
+                    <div className="flex flex-col items-center">
+                        <span className="font-bold text-slate-300 text-lg">{scenes.filter(s => s.imageUrl).length}</span>
+                        <span>Completed</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                        <span className="font-bold text-slate-300 text-lg">{scenes.length}</span>
+                        <span>Total Scenes</span>
+                    </div>
+                </div>
+                {queueStatus && (
+                    <div className="text-xs font-mono text-cyan-400 animate-pulse">
+                        {queueStatus}
+                    </div>
+                )}
+            </div>
+        </div>
+
+        {/* Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 scene-grid">
           {filteredScenes.map((scene) => (
             <SceneCard 
-                key={scene.id} 
-                scene={scene} 
-                onGenerate={handleGenerate} 
+              key={scene.id} 
+              scene={scene} 
+              onGenerate={isQueueRunning ? () => {} : handleGenerate} 
             />
           ))}
         </div>
-      </main>
 
-      {/* Footer Status Bar (Visible during generation) */}
-      <div className={`fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 p-2 transition-transform duration-300 z-40 no-print ${queueStatus ? 'translate-y-0' : 'translate-y-full'}`}>
-          <div className="max-w-7xl mx-auto flex items-center justify-between px-4">
-              <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></div>
-                  <span className="text-xs font-mono text-cyan-400">{queueStatus}</span>
-              </div>
-              {isBulkGenerating && (
-                  <button onClick={() => {
-                      if (abortControllerRef.current) abortControllerRef.current.abort();
-                      setIsBulkGenerating(false);
-                      setQueueStatus('Stopped.');
-                  }} className="text-xs text-slate-400 hover:text-white underline">
-                      Cancel
-                  </button>
-              )}
-          </div>
-      </div>
+        {filteredScenes.length === 0 && (
+            <div className="text-center py-20 text-slate-500 no-print">
+                <p>No scenes found in this section.</p>
+            </div>
+        )}
+      </main>
+      
+      {/* Mobile FAB */}
+      <button
+        onClick={isQueueRunning ? () => {} : generateAllVisible}
+        className={`md:hidden fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center text-white z-50 active:scale-95 transition-transform no-print ${isQueueRunning ? 'bg-slate-700 cursor-not-allowed' : 'bg-cyan-600'}`}
+      >
+        {isQueueRunning ? (
+            <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+        ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        )}
+      </button>
 
     </div>
   );
