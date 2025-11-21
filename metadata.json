@@ -1,0 +1,5 @@
+{
+  "name": "Promise of Two Worlds Storyboard",
+  "description": "A visual storyboard generator for the script 'The Promise of Two Worlds', utilizing Gemini's image generation capabilities.",
+  "requestFramePermissions": []
+}
