@@ -3,6 +3,7 @@ import { INITIAL_SCENES } from './constants';
 import { SceneData } from './types';
 import SceneCard from './components/SceneCard';
 import { generateSceneImage } from './services/geminiService';
+import { downloadStoryboardAsHTML, downloadStoryboardAsJSON } from './utils/downloadUtils';
 
 const App: React.FC = () => {
   const [scenes, setScenes] = useState<SceneData[]>(INITIAL_SCENES);
@@ -10,6 +11,7 @@ const App: React.FC = () => {
   const [apiKey, setApiKey] = useState<string>('');
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [tempKey, setTempKey] = useState<string>('');
+  const [showDownloadMenu, setShowDownloadMenu] = useState<boolean>(false);
   
   // Queue State
   const [isBulkGenerating, setIsBulkGenerating] = useState<boolean>(false);
@@ -24,6 +26,21 @@ const App: React.FC = () => {
       setTempKey(storedKey);
     }
   }, []);
+
+  // Close download menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showDownloadMenu) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.relative')) {
+          setShowDownloadMenu(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showDownloadMenu]);
 
   const saveApiKey = () => {
     setApiKey(tempKey);
@@ -128,6 +145,16 @@ const App: React.FC = () => {
     window.print();
   };
 
+  const handleDownloadHTML = () => {
+    downloadStoryboardAsHTML(scenes);
+    setShowDownloadMenu(false);
+  };
+
+  const handleDownloadJSON = () => {
+    downloadStoryboardAsJSON(scenes);
+    setShowDownloadMenu(false);
+  };
+
   const filteredScenes = activeTab === 0 
     ? scenes 
     : scenes.filter(s => s.sectionTitle === sections[activeTab - 1]);
@@ -212,7 +239,7 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
-            <button 
+            <button
                 onClick={() => { setTempKey(apiKey); setShowSettings(true); }}
                 className={`p-2 transition-colors ${apiKey ? 'text-cyan-400' : 'text-slate-400 hover:text-white'}`}
                 title={apiKey ? "API Key Configured" : "Configure API Key"}
@@ -222,15 +249,51 @@ const App: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
             </button>
-            <button 
-                onClick={handlePrint}
-                className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-all"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Print / PDF
-            </button>
+            <div className="relative">
+              <button
+                  onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                  className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-all"
+              >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+              </button>
+              {showDownloadMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden z-50">
+                  <button
+                    onClick={handleDownloadHTML}
+                    className="w-full px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 transition-colors flex items-center gap-3"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    HTML (with images)
+                  </button>
+                  <button
+                    onClick={handleDownloadJSON}
+                    className="w-full px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 transition-colors flex items-center gap-3"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                    JSON (data only)
+                  </button>
+                  <button
+                    onClick={() => { handlePrint(); setShowDownloadMenu(false); }}
+                    className="w-full px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 transition-colors flex items-center gap-3 border-t border-slate-700"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    Print / PDF
+                  </button>
+                </div>
+              )}
+            </div>
             <button 
                 onClick={handleMainButtonClick}
                 className={`hidden sm:flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-lg transition-all shadow-lg active:scale-95 ${
