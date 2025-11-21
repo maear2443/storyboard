@@ -38,23 +38,37 @@
 
 ## 🌐 GitHub Pages로 배포하기
 
-이 프로젝트는 GitHub Pages로 자동 배포됩니다.
+이 프로젝트는 간단하게 GitHub Pages로 배포할 수 있습니다.
 
-### 자동 배포 설정
+### 배포 방법
 
-1. GitHub 저장소 설정으로 이동: **Settings** → **Pages**
-2. **Source**를 **GitHub Actions**로 설정
-3. `main` 또는 `master` 브랜치에 푸시하면 자동으로 배포됩니다
+1. 프로젝트 빌드:
+   ```bash
+   npm run build
+   ```
+   빌드된 파일은 `docs` 폴더에 생성됩니다.
 
-배포된 사이트는 `https://[username].github.io/storyboard/`에서 확인할 수 있습니다.
+2. GitHub 저장소 설정으로 이동: **Settings** → **Pages**
 
-### 수동 배포
+3. **Source** 섹션에서:
+   - **Branch**: `main` (또는 `master`) 선택
+   - **Folder**: `/docs` 선택
+   - **Save** 클릭
 
+4. 몇 분 후 배포 완료! 다음 URL에서 확인:
+   - `https://[username].github.io/storyboard/`
+
+### 업데이트 방법
+
+코드 수정 후:
 ```bash
 npm run build
+git add docs/
+git commit -m "Update storyboard"
+git push
 ```
 
-빌드된 파일은 `dist` 폴더에 생성됩니다.
+GitHub Pages가 자동으로 업데이트됩니다.
 
 ## 📖 사용 방법
 
