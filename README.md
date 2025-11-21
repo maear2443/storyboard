@@ -17,52 +17,35 @@
 - 🎬 **섹션별 관리**: 스토리보드를 섹션별로 구분하여 관리
 - ⚡ **자동 생성**: 한 번의 클릭으로 전체 섹션의 이미지를 순차적으로 생성
 
-## 🚀 로컬에서 실행하기
+## 🚀 바로 사용하기
 
-**필수 조건**: Node.js 20+
+**빌드 도구 필요 없음!** 순수 HTML 파일로 작동합니다.
 
-1. 의존성 설치:
-   ```bash
-   npm install
-   ```
+### 방법 1: 로컬에서 바로 열기
 
-2. 개발 서버 실행:
-   ```bash
-   npm run dev
-   ```
+1. `standalone.html` 파일을 브라우저로 드래그 앤 드롭
+2. 설정 버튼(⚙️)을 클릭하여 Google Gemini API 키 입력
+   - API 키는 [Google AI Studio](https://aistudio.google.com/app/apikey)에서 무료로 발급
+3. 바로 사용 시작!
 
-3. 브라우저에서 http://localhost:3000 열기
+### 방법 2: GitHub Pages로 배포
 
-4. 설정 버튼(⚙️)을 클릭하여 Google Gemini API 키 입력
-   - API 키는 [Google AI Studio](https://aistudio.google.com/app/apikey)에서 무료로 발급받을 수 있습니다
+**npm install, build 없이 즉시 배포!**
 
-## 🌐 GitHub Pages로 배포하기
+1. GitHub 저장소 설정으로 이동: **Settings** → **Pages**
 
-이 프로젝트는 간단하게 GitHub Pages로 배포할 수 있습니다.
-
-### 배포 방법
-
-1. 프로젝트 빌드:
-   ```bash
-   npm run build
-   ```
-   빌드된 파일은 `docs` 폴더에 생성됩니다.
-
-2. GitHub 저장소 설정으로 이동: **Settings** → **Pages**
-
-3. **Source** 섹션에서:
+2. **Source** 섹션에서:
    - **Branch**: `main` (또는 `master`) 선택
    - **Folder**: `/docs` 선택
    - **Save** 클릭
 
-4. 몇 분 후 배포 완료! 다음 URL에서 확인:
+3. 몇 분 후 배포 완료!
    - `https://[username].github.io/storyboard/`
 
 ### 업데이트 방법
 
-코드 수정 후:
+HTML 수정 후:
 ```bash
-npm run build
 git add docs/
 git commit -m "Update storyboard"
 git push
@@ -86,17 +69,35 @@ GitHub Pages가 자동으로 업데이트됩니다.
 
 ## 🛠️ 기술 스택
 
-- **Frontend**: React 19 + TypeScript
-- **Build Tool**: Vite 6
+- **Frontend**: React 19 (CDN 로드 via ESM)
 - **AI**: Google Gemini 2.5 Flash Image
-- **Deployment**: GitHub Pages + GitHub Actions
+- **Deployment**: GitHub Pages (순수 HTML)
+- **No Build Tools**: npm, Vite, Webpack 등 불필요!
 
-## 📝 라이선스
+## 💡 특징
 
-이 프로젝트는 개인 프로젝트입니다.
+- ✅ **빌드 과정 없음**: 단일 HTML 파일로 완결
+- ✅ **의존성 설치 불필요**: CDN에서 모든 라이브러리 로드
+- ✅ **즉시 실행 가능**: 브라우저에서 바로 열기만 하면 됨
+- ✅ **GitHub Pages 최적화**: docs 폴더에 바로 배포
+
+## 📝 파일 구조
+
+```
+storyboard/
+├── standalone.html       # 메인 애플리케이션 (모든 기능 포함)
+└── docs/
+    └── index.html       # GitHub Pages용 (standalone.html 복사본)
+```
 
 ## 🔗 참고 링크
 
 - [Google AI Studio](https://aistudio.google.com/)
 - [Gemini API 문서](https://ai.google.dev/docs)
 - 원본 앱: https://ai.studio/apps/drive/116YZf3nw2uMeJv4Q_dhYjJxTnuOWXVOR
+
+---
+
+<div align="center">
+<strong>No npm. No build. Just HTML. 🚀</strong>
+</div>
